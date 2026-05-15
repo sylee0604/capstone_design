@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "1688 쇼핑 어시스턴트",
+  "version": "1.0",
+  "description": "한국어로 1688 상품 검색 → AI가 베스트 3 추천",
+  "permissions": ["activeTab", "scripting", "storage", "tabs", "sidePanel"],
+  "host_permissions": [
+    "https://*.1688.com/*",
+    "http://localhost:8000/*",
+    "https://translate.googleapis.com/*",
+    "https://open.er-api.com/*"
+  ],
+  "action": {},
+  "side_panel": {
+    "default_path": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  }
+}
