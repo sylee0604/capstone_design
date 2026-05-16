@@ -35,8 +35,6 @@ async function translateToChineseKeywords(koreanQuery) {
 
 // executeScript에 주입되는 async 함수 — 외부 변수 참조 불가
 async function scrapeProducts() {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-
   function parseCount(str) {
     if (!str) return 0;
     const s = String(str);
@@ -58,14 +56,19 @@ async function scrapeProducts() {
       const els = Array.from(document.querySelectorAll(sel));
       if (els.length >= 3) return els;
     }
-    // fallback: offerId 링크가 있는 div
-    const allDivs = Array.from(document.querySelectorAll('div'));
-    const withImgLink = allDivs.filter(el =>
-      el.querySelector('img') &&
-      el.querySelector('a[href*="offerId"]') &&
-      (el.innerText || '').length > 10
-    );
-    if (withImgLink.length >= 3) return withImgLink;
+    // fallback: offerId 링크를 기준으로 가장 가까운 카드 컨테이너 탐색
+    const offerLinks = Array.from(document.querySelectorAll('a[href*="offerId"]'));
+    const cardSet = new Set();
+    for (const link of offerLinks) {
+      let el = link.parentElement;
+      for (let depth = 0; el && depth < 5; depth++, el = el.parentElement) {
+        if (el.querySelector('img') && (el.innerText || '').length > 10) {
+          cardSet.add(el);
+          break;
+        }
+      }
+    }
+    if (cardSet.size >= 3) return Array.from(cardSet);
     return [];
   }
 
@@ -154,7 +157,10 @@ async function waitForCards(tabId, maxWait = 10000) {
   while (Date.now() - start < maxWait) {
     const res = await chrome.scripting.executeScript({
       target: { tabId },
-      func: () => document.querySelectorAll('.search-offer-item').length,
+      func: () => {
+        const selectors = ['.search-offer-item', '[class*="search-offer"]', '[class*="offer-item"]', 'a[href*="offerId"]'];
+        return Math.max(...selectors.map(s => document.querySelectorAll(s).length));
+      },
     });
     if ((res[0]?.result || 0) >= 3) {
       await new Promise(r => setTimeout(r, 500));
@@ -192,15 +198,7 @@ async function handleSearch(koreanQuery) {
   let tabId;
   if (tabs1688.length > 0) {
     tabId = tabs1688[0].id;
-    const currentTab = await chrome.tabs.get(tabId);
-    // 이미 검색 결과 페이지면 홈으로 초기화해야 form 주입 가능
-    if (!currentTab.url.includes('www.1688.com')) {
-      await chrome.tabs.update(tabId, { url: 'https://www.1688.com', active: true });
-      await waitForTabLoad(tabId);
-      await new Promise(r => setTimeout(r, 1000));
-    } else {
-      await chrome.tabs.update(tabId, { active: true });
-    }
+    await chrome.tabs.update(tabId, { active: true });
   } else {
     const newTab = await chrome.tabs.create({ url: 'https://www.1688.com', active: true });
     await waitForTabLoad(newTab.id);
@@ -253,11 +251,8 @@ async function handleSearch(koreanQuery) {
     return { chineseQuery, products: [], error: '1688 상품을 찾지 못했습니다. 1688에 로그인되어 있는지 확인하세요.' };
   }
 
-  // 6. 점수 기준 정렬 (점수는 scrapeProducts에서 이미 수집)
+  // 6. 점수 합산 후 정렬 → 상위 5개
   console.log('[products with scores]', products.slice(0, 5).map(p => ({ title: p.title?.slice(0, 20), svc: p.serviceScore, qty: p.qualityScore })));
-  const scoreMap = {}; // unused but kept for structure
-
-  // 7. 점수 합산 후 정렬 → 상위 5개
   function parseNum(str) {
     if (!str) return 0;
     const s = String(str).replace(/,/g, '');
@@ -279,21 +274,22 @@ async function handleSearch(koreanQuery) {
       reviews: p.qualityScore ? `품질 ${p.qualityScore}` : '',
     }));
 
-  // 8. 환율 적용
-  const rate = await getCnyToKrw();
+  // 7. 환율 조회 + 상품명 번역 (병렬)
+  const [rate] = await Promise.all([
+    getCnyToKrw(),
+    ...ranked.map(async (p, i) => {
+      try {
+        ranked[i].title = await googleTranslate(p.title, 'zh-CN', 'ko');
+      } catch(e) {
+        console.log('[title translation error]', String(e));
+      }
+    })
+  ]);
+
   ranked.forEach(p => {
     const won = p.price ? Math.round(parseFloat(p.price) * rate) : null;
     p.priceKrw = won ? won.toLocaleString('ko-KR') : '';
   });
-
-  // 9. 상품명 한국어 번역 (병렬)
-  await Promise.all(ranked.map(async (p, i) => {
-    try {
-      ranked[i].title = await googleTranslate(p.title, 'zh-CN', 'ko');
-    } catch(e) {
-      console.log('[title translation error]', String(e));
-    }
-  }));
 
   return { chineseQuery, products: ranked };
 }
@@ -473,6 +469,18 @@ function injectDragOverlay() {
     box.style.height = h + 'px';
   });
 
+  function cleanup() {
+    overlay.remove();
+    document.removeEventListener('keydown', onEsc);
+  }
+
+  function onEsc(e) {
+    if (e.key === 'Escape') {
+      cleanup();
+      chrome.runtime.sendMessage({ type: 'DRAG_DONE', rect: null });
+    }
+  }
+
   overlay.addEventListener('mouseup', e => {
     if (!dragging) return;
     dragging = false;
@@ -482,17 +490,11 @@ function injectDragOverlay() {
       width: Math.abs(e.clientX - startX),
       height: Math.abs(e.clientY - startY)
     };
-    overlay.remove();
+    cleanup();
     chrome.runtime.sendMessage({ type: 'DRAG_DONE', rect });
   });
 
-  document.addEventListener('keydown', function esc(e) {
-    if (e.key === 'Escape') {
-      overlay.remove();
-      document.removeEventListener('keydown', esc);
-      chrome.runtime.sendMessage({ type: 'DRAG_DONE', rect: null });
-    }
-  });
+  document.addEventListener('keydown', onEsc);
 
   document.body.appendChild(overlay);
 }

@@ -17,12 +17,8 @@ function doSearch() {
         showError('확장프로그램 오류: ' + chrome.runtime.lastError.message);
         return;
       }
-      if (!response.ok) {
+      if (!response.ok || response.error) {
         showError(response.error || '알 수 없는 오류');
-        return;
-      }
-      if (response.error) {
-        showError(response.error);
         return;
       }
       renderResults(response.products, response.chineseQuery, query);
