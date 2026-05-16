@@ -165,6 +165,83 @@
       border-top: 1px solid #ffd6d2;
     }
     .card-link:hover { background: #ffd6d2; }
+
+    /* 이미지 추출 섹션 */
+    #ocr-section {
+      padding: 14px 16px;
+      border-top: 2px solid #e8392a;
+      background: white;
+    }
+    #ocr-section h3 {
+      font-size: 13px;
+      margin-bottom: 8px;
+      color: #212529;
+    }
+    #ocr-btn {
+      width: 100%;
+      padding: 10px;
+      background: #ff6b35;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    #ocr-btn:hover { background: #e55a2b; }
+    #ocr-btn.active { background: #28a745; }
+    #ocr-status {
+      font-size: 12px;
+      color: #6c757d;
+      margin-top: 8px;
+      display: none;
+    }
+    #ocr-result {
+      margin-top: 10px;
+      display: none;
+      background: #f8f9fa;
+      border: 1px solid #dee2e6;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    #ocr-result .ocr-original {
+      padding: 10px;
+      font-size: 12px;
+      color: #6c757d;
+      border-bottom: 1px solid #dee2e6;
+      line-height: 1.5;
+      overflow-x: auto;
+    }
+    #ocr-result .ocr-translated {
+      padding: 10px;
+      font-size: 13px;
+      color: #212529;
+      line-height: 1.6;
+      overflow-x: auto;
+    }
+    #ocr-result .ocr-label {
+      font-size: 10px;
+      font-weight: 700;
+      color: #e8392a;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    #ocr-result table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      margin-top: 4px;
+    }
+    #ocr-result th, #ocr-result td {
+      border: 1px solid #dee2e6;
+      padding: 5px 8px;
+      text-align: center;
+      white-space: nowrap;
+    }
+    #ocr-result th {
+      background: #f1f3f5;
+      font-weight: 600;
+    }
   </style>
 </head>
 <body>
@@ -187,6 +264,17 @@
 
   <!-- 결과 카드 -->
   <div id="results"></div>
+
+  <!-- 이미지 텍스트 추출 -->
+  <div id="ocr-section">
+    <h3>이미지 텍스트 추출 + 번역</h3>
+    <button id="ocr-btn">드래그로 영역 선택</button>
+    <div id="ocr-status"><div class="spinner"></div><span id="ocr-status-text"></span></div>
+    <div id="ocr-result">
+      <div class="ocr-original"><div class="ocr-label">원문 (중국어)</div><span id="ocr-original-text"></span></div>
+      <div class="ocr-translated"><div class="ocr-label">번역 (한국어)</div><span id="ocr-translated-text"></span></div>
+    </div>
+  </div>
 
   <script src="popup.js"></script>
 </body>

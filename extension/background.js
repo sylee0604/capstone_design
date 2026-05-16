@@ -171,6 +171,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch(err => sendResponse({ ok: false, error: err.message }));
     return true;
   }
+  if (message.type === 'START_DRAG') {
+    handleStartDrag();
+    sendResponse({ ok: true });
+    return false;
+  }
+  if (message.type === 'DRAG_DONE') {
+    handleDragDone(message.rect);
+    return false;
+  }
 });
 
 async function handleSearch(koreanQuery) {
@@ -287,4 +296,203 @@ async function handleSearch(koreanQuery) {
   }));
 
   return { chineseQuery, products: ranked };
+}
+
+// === 이미지 텍스트 추출 (드래그 + OCR) ===
+
+async function handleStartDrag() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab) {
+      notifyPopup({ type: 'OCR_RESULT', error: '활성 탭을 찾을 수 없습니다' });
+      return;
+    }
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: injectDragOverlay,
+    });
+  } catch (e) {
+    notifyPopup({ type: 'OCR_RESULT', error: e.message });
+  }
+}
+
+async function handleDragDone(rect) {
+  try {
+    if (!rect || rect.width < 10 || rect.height < 10) {
+      notifyPopup({ type: 'OCR_RESULT', error: '선택이 취소되었거나 영역이 너무 작습니다' });
+      return;
+    }
+
+    notifyPopup({ type: 'OCR_STATUS', text: '화면 캡처 중...' });
+
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+    const croppedData = await cropImage(dataUrl, rect, tab.id);
+
+    notifyPopup({ type: 'OCR_STATUS', text: 'AI가 텍스트 추출 + 번역 중...' });
+
+    const result = await handleOCRTranslate(croppedData);
+    notifyPopup({ type: 'OCR_RESULT', ...result });
+  } catch (e) {
+    notifyPopup({ type: 'OCR_RESULT', error: e.message });
+  }
+}
+
+function notifyPopup(msg) {
+  chrome.runtime.sendMessage(msg).catch(() => {});
+}
+
+async function cropImage(dataUrl, rect, tabId) {
+  const result = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (imgDataUrl, r) => {
+      return new Promise(resolve => {
+        const img = new Image();
+        img.onload = () => {
+          const dpr = window.devicePixelRatio || 1;
+          const canvas = document.createElement('canvas');
+          canvas.width = r.width * dpr;
+          canvas.height = r.height * dpr;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img,
+            r.x * dpr, r.y * dpr, r.width * dpr, r.height * dpr,
+            0, 0, r.width * dpr, r.height * dpr
+          );
+          resolve(canvas.toDataURL('image/png'));
+        };
+        img.src = imgDataUrl;
+      });
+    },
+    args: [dataUrl, rect],
+  });
+  return result[0]?.result;
+}
+
+async function handleOCRTranslate(imageDataUrl) {
+  const base64 = imageDataUrl.replace(/^data:image\/\w+;base64,/, '');
+
+  const response = await fetch('http://localhost:8000/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'Qwen/Qwen2.5-VL-7B-Instruct',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'image_url',
+              image_url: { url: `data:image/png;base64,${base64}` }
+            },
+            {
+              type: 'text',
+              text: `이 이미지에서 텍스트를 추출하고 한국어로 번역해주세요.
+
+규칙:
+- 이미지에 표(테이블)가 있으면 반드시 마크다운 표 형식(| 열1 | 열2 | 로 구분)으로 출력하세요.
+- 표가 아닌 일반 텍스트는 그냥 텍스트로 출력하세요.
+- 숫자, 단위(cm, kg 등)는 번역하지 말고 그대로 유지하세요.
+
+다음 형식으로 응답:
+[원문]
+(추출한 중국어 텍스트 또는 마크다운 표)
+
+[번역]
+(한국어 번역 텍스트 또는 마크다운 표)`
+            }
+          ]
+        }
+      ],
+      max_tokens: 1024,
+      temperature: 0.1
+    })
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`GPU 서버 오류: ${response.status} ${errText.slice(0, 100)}`);
+  }
+
+  const data = await response.json();
+  const content = data.choices?.[0]?.message?.content || '';
+
+  let original = '', translated = '';
+  const origMatch = content.match(/\[원문\]\s*([\s\S]*?)\s*\[번역\]/);
+  const transMatch = content.match(/\[번역\]\s*([\s\S]*)/);
+
+  if (origMatch) original = origMatch[1].trim();
+  if (transMatch) translated = transMatch[1].trim();
+
+  if (!original && !translated) {
+    original = content;
+    translated = '(파싱 실패 - 위 원문 참조)';
+  }
+
+  return { original, translated };
+}
+
+function injectDragOverlay() {
+  const existing = document.getElementById('__ocr_overlay__');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = '__ocr_overlay__';
+  overlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:2147483647;cursor:crosshair;background:rgba(0,0,0,0.1);';
+
+  const box = document.createElement('div');
+  box.style.cssText = 'position:absolute;border:2px dashed #e8392a;background:rgba(232,57,42,0.1);display:none;';
+  overlay.appendChild(box);
+
+  const label = document.createElement('div');
+  label.style.cssText = 'position:fixed;top:10px;left:50%;transform:translateX(-50%);background:#e8392a;color:white;padding:8px 16px;border-radius:20px;font:600 14px sans-serif;z-index:2147483647;';
+  label.textContent = '번역할 영역을 드래그하세요 (ESC 취소)';
+  overlay.appendChild(label);
+
+  let startX, startY, dragging = false;
+
+  overlay.addEventListener('mousedown', e => {
+    startX = e.clientX;
+    startY = e.clientY;
+    dragging = true;
+    box.style.left = startX + 'px';
+    box.style.top = startY + 'px';
+    box.style.width = '0';
+    box.style.height = '0';
+    box.style.display = 'block';
+  });
+
+  overlay.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    const x = Math.min(e.clientX, startX);
+    const y = Math.min(e.clientY, startY);
+    const w = Math.abs(e.clientX - startX);
+    const h = Math.abs(e.clientY - startY);
+    box.style.left = x + 'px';
+    box.style.top = y + 'px';
+    box.style.width = w + 'px';
+    box.style.height = h + 'px';
+  });
+
+  overlay.addEventListener('mouseup', e => {
+    if (!dragging) return;
+    dragging = false;
+    const rect = {
+      x: Math.min(e.clientX, startX),
+      y: Math.min(e.clientY, startY),
+      width: Math.abs(e.clientX - startX),
+      height: Math.abs(e.clientY - startY)
+    };
+    overlay.remove();
+    chrome.runtime.sendMessage({ type: 'DRAG_DONE', rect });
+  });
+
+  document.addEventListener('keydown', function esc(e) {
+    if (e.key === 'Escape') {
+      overlay.remove();
+      document.removeEventListener('keydown', esc);
+      chrome.runtime.sendMessage({ type: 'DRAG_DONE', rect: null });
+    }
+  });
+
+  document.body.appendChild(overlay);
 }

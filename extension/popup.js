@@ -129,3 +129,85 @@ function escHtml(str) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 }
+
+// --- 이미지 텍스트 추출 ---
+$('ocr-btn').addEventListener('click', startOCR);
+
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.type === 'OCR_STATUS') {
+    setOCRStatus(msg.text);
+  }
+  if (msg.type === 'OCR_RESULT') {
+    $('ocr-btn').textContent = '드래그로 영역 선택';
+    $('ocr-btn').classList.remove('active');
+    $('ocr-status').style.display = 'none';
+    if (msg.error) {
+      setOCRStatus(msg.error);
+    } else {
+      showOCRResult(msg.original, msg.translated);
+    }
+  }
+});
+
+function startOCR() {
+  $('ocr-result').style.display = 'none';
+  $('ocr-status').style.display = 'none';
+  $('ocr-btn').textContent = '페이지에서 영역을 드래그하세요...';
+  $('ocr-btn').classList.add('active');
+
+  chrome.runtime.sendMessage({ type: 'START_DRAG' }, response => {
+    if (chrome.runtime.lastError) {
+      setOCRStatus('오류: ' + chrome.runtime.lastError.message);
+      $('ocr-btn').textContent = '드래그로 영역 선택';
+      $('ocr-btn').classList.remove('active');
+    }
+  });
+}
+
+function setOCRStatus(msg) {
+  $('ocr-status').style.display = 'flex';
+  $('ocr-status-text').textContent = msg;
+}
+
+function showOCRResult(original, translated) {
+  $('ocr-original-text').innerHTML = mdTableToHtml(escHtml(original));
+  $('ocr-translated-text').innerHTML = mdTableToHtml(escHtml(translated));
+  $('ocr-result').style.display = 'block';
+}
+
+function mdTableToHtml(text) {
+  const lines = text.split('\n');
+  let html = '';
+  let inTable = false;
+  let tableRows = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (line.startsWith('|') && line.endsWith('|')) {
+      if (/^\|[\s\-:|]+\|$/.test(line)) continue;
+      const cells = line.slice(1, -1).split('|').map(c => c.trim());
+      tableRows.push(cells);
+      inTable = true;
+    } else {
+      if (inTable) {
+        html += renderTable(tableRows);
+        tableRows = [];
+        inTable = false;
+      }
+      if (line) html += line + '<br>';
+    }
+  }
+  if (tableRows.length) html += renderTable(tableRows);
+  return html || text;
+}
+
+function renderTable(rows) {
+  if (rows.length === 0) return '';
+  let h = '<table>';
+  h += '<tr>' + rows[0].map(c => `<th>${c}</th>`).join('') + '</tr>';
+  for (let i = 1; i < rows.length; i++) {
+    h += '<tr>' + rows[i].map(c => `<td>${c}</td>`).join('') + '</tr>';
+  }
+  h += '</table>';
+  return h;
+}
