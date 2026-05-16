@@ -1,5 +1,10 @@
 const $ = id => document.getElementById(id);
 
+// --- 상태 ---
+let lastProducts = [];
+let lastChineseQuery = '';
+let lastKoreanQuery = '';
+
 // --- 검색 ---
 $('search-btn').addEventListener('click', doSearch);
 $('query-input').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
@@ -21,16 +26,128 @@ function doSearch() {
         showError(response.error || '알 수 없는 오류');
         return;
       }
-      renderResults(response.products, response.chineseQuery, query);
+      lastProducts = response.products;
+      lastChineseQuery = response.chineseQuery;
+      lastKoreanQuery = query;
+      showListView();
     }
   );
 }
 
-// loading 상태일 때 텍스트 순환
+// --- 리스트 뷰 (5개 카드) ---
+function showListView() {
+  hideLoading();
+  hideError();
+  exitDetailView();
+
+  const header = $('results-header');
+  header.textContent = `"${lastKoreanQuery}" → ${lastChineseQuery} | 베스트 ${lastProducts.length}개`;
+  header.style.display = 'block';
+
+  const container = $('results');
+  container.innerHTML = '';
+
+  const ranks = ['1위', '2위', '3위', '4위', '5위'];
+  lastProducts.forEach((p, i) => {
+    container.appendChild(buildCard(p, i, ranks));
+  });
+
+  container.style.display = 'flex';
+}
+
+function buildCard(p, index, ranks) {
+  const card = document.createElement('div');
+  card.className = 'card';
+
+  const imgHtml = p.image
+    ? `<img class="card-img" src="${escHtml(p.image)}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" /><div class="card-img-placeholder" style="display:none">&#128722;</div>`
+    : `<div class="card-img-placeholder">&#128722;</div>`;
+
+  const priceYuan = p.price ? parseFloat(p.price).toFixed(2) : '';
+  const priceHtml = priceYuan
+    ? `<div class="card-price">${p.priceKrw ? `${escHtml(p.priceKrw)}원` : ''}<span> (${escHtml(priceYuan)}위안)</span></div>`
+    : '';
+  const ratingHtml = p.rating ? `⭐ ${escHtml(p.rating)}` : '';
+  const reviewsHtml = p.reviews ? `💬 ${escHtml(p.reviews)}` : '';
+  const salesHtml = p.sales ? `🛒 ${escHtml(p.sales)}` : '';
+  const metaHtml = [ratingHtml, reviewsHtml, salesHtml].filter(Boolean).join(' &nbsp;');
+  const metaLine = metaHtml ? `<div class="card-meta">${metaHtml}</div>` : '';
+
+  card.innerHTML = `
+    <div class="card-inner">
+      ${imgHtml}
+      <div class="card-body">
+        <div class="card-rank">${ranks[index] || (index + 1) + '위'}</div>
+        <div class="card-title">${escHtml(p.title)}</div>
+        ${priceHtml}
+        ${metaLine}
+      </div>
+    </div>
+    ${p.reason ? `<div class="card-reason">AI 추천 이유: ${escHtml(p.reason)}</div>` : ''}
+    ${p.url ? `<a class="card-link" href="${escHtml(p.url)}" target="_blank" data-index="${index}">1688에서 보기</a>` : ''}
+  `;
+
+  const link = card.querySelector('.card-link');
+  if (link) {
+    link.addEventListener('click', e => {
+      e.preventDefault();
+      window.open(link.href, '_blank');
+      enterDetailView(index);
+    });
+  }
+
+  return card;
+}
+
+// --- 상세 뷰 (선택한 카드 + 이미지 번역) ---
+function enterDetailView(index) {
+  const p = lastProducts[index];
+  const ranks = ['1위', '2위', '3위', '4위', '5위'];
+
+  // 헤더 변경
+  $('back-btn').style.display = 'block';
+  $('results-header').style.display = 'none';
+  $('search-section').style.display = 'none';
+
+  // 카드 하나만 표시
+  const container = $('results');
+  container.innerHTML = '';
+  const card = buildCard(p, index, ranks);
+  // 상세 뷰에서는 링크 제거 (이미 열었으므로)
+  const link = card.querySelector('.card-link');
+  if (link) link.remove();
+  container.appendChild(card);
+  container.style.display = 'flex';
+
+  // OCR 초기화
+  $('ocr-result').style.display = 'none';
+  $('ocr-status').style.display = 'none';
+  $('ocr-btn').textContent = '이미지 번역';
+  $('ocr-btn').classList.remove('active');
+}
+
+function exitDetailView() {
+  $('back-btn').style.display = 'none';
+  $('search-section').style.display = 'block';
+  $('ocr-result').style.display = 'none';
+  $('ocr-status').style.display = 'none';
+  $('ocr-btn').textContent = '이미지 번역';
+  $('ocr-btn').classList.remove('active');
+}
+
+// 뒤로가기
+$('back-btn').addEventListener('click', () => {
+  if (lastProducts.length > 0) {
+    showListView();
+  }
+});
+
+// --- Loading / Error ---
 let loadingInterval = null;
 function setLoading(initialText) {
   hideResults();
   hideError();
+  exitDetailView();
   $('status').style.display = 'flex';
   $('status-text').textContent = initialText;
 
@@ -69,55 +186,6 @@ function hideResults() {
   $('results-header').style.display = 'none';
 }
 
-function renderResults(products, chineseQuery, koreanQuery) {
-  hideLoading();
-  hideError();
-
-  const header = $('results-header');
-  header.textContent = `"${koreanQuery}" → 검색어: ${chineseQuery} | 베스트 ${products.length}개`;
-  header.style.display = 'block';
-
-  const container = $('results');
-  container.innerHTML = '';
-
-  const ranks = ['1위', '2위', '3위', '4위', '5위'];
-  products.forEach((p, i) => {
-    const card = document.createElement('div');
-    card.className = 'card';
-
-    const imgHtml = p.image
-      ? `<img class="card-img" src="${escHtml(p.image)}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" /><div class="card-img-placeholder" style="display:none">&#128722;</div>`
-      : `<div class="card-img-placeholder">&#128722;</div>`;
-
-    const priceYuan = p.price ? parseFloat(p.price).toFixed(2) : '';
-    const priceHtml = priceYuan
-      ? `<div class="card-price">${p.priceKrw ? `${escHtml(p.priceKrw)}원` : ''}<span> (${escHtml(priceYuan)}위안)</span></div>`
-      : '';
-    const ratingHtml = p.rating ? `⭐ ${escHtml(p.rating)}` : '';
-    const reviewsHtml = p.reviews ? `💬 ${escHtml(p.reviews)}` : '';
-    const salesHtml = p.sales ? `🛒 ${escHtml(p.sales)}` : '';
-    const metaHtml = [ratingHtml, reviewsHtml, salesHtml].filter(Boolean).join(' &nbsp;');
-    const metaLine = metaHtml ? `<div class="card-meta">${metaHtml}</div>` : '';
-
-    card.innerHTML = `
-      <div class="card-inner">
-        ${imgHtml}
-        <div class="card-body">
-          <div class="card-rank">${ranks[i] || (i + 1) + '위'}</div>
-          <div class="card-title">${escHtml(p.title)}</div>
-          ${priceHtml}
-          ${metaLine}
-        </div>
-      </div>
-      ${p.reason ? `<div class="card-reason">AI 추천 이유: ${escHtml(p.reason)}</div>` : ''}
-      ${p.url ? `<a class="card-link" href="${escHtml(p.url)}" target="_blank">1688에서 보기</a>` : ''}
-    `;
-    container.appendChild(card);
-  });
-
-  container.style.display = 'flex';
-}
-
 function escHtml(str) {
   return String(str)
     .replace(/&/g, '&amp;')
@@ -134,7 +202,7 @@ chrome.runtime.onMessage.addListener((msg) => {
     setOCRStatus(msg.text);
   }
   if (msg.type === 'OCR_RESULT') {
-    $('ocr-btn').textContent = '드래그로 영역 선택';
+    $('ocr-btn').textContent = '이미지 번역';
     $('ocr-btn').classList.remove('active');
     $('ocr-status').style.display = 'none';
     if (msg.error) {
@@ -154,7 +222,7 @@ function startOCR() {
   chrome.runtime.sendMessage({ type: 'START_DRAG' }, response => {
     if (chrome.runtime.lastError) {
       setOCRStatus('오류: ' + chrome.runtime.lastError.message);
-      $('ocr-btn').textContent = '드래그로 영역 선택';
+      $('ocr-btn').textContent = '이미지 번역';
       $('ocr-btn').classList.remove('active');
     }
   });

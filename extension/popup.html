@@ -22,8 +22,21 @@
       font-size: 15px;
       font-weight: 700;
       letter-spacing: -0.3px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
     header span { font-weight: 400; font-size: 12px; opacity: 0.85; margin-left: 6px; }
+    #back-btn {
+      background: none;
+      border: none;
+      color: white;
+      font-size: 18px;
+      cursor: pointer;
+      padding: 0 4px;
+      display: none;
+      font-weight: 400;
+    }
 
     .section { padding: 14px 16px; }
 
@@ -163,13 +176,7 @@
     /* 이미지 추출 섹션 */
     #ocr-section {
       padding: 14px 16px;
-      border-top: 2px solid #e8392a;
       background: white;
-    }
-    #ocr-section h3 {
-      font-size: 13px;
-      margin-bottom: 8px;
-      color: #212529;
     }
     #ocr-btn {
       width: 100%;
@@ -239,7 +246,10 @@
   </style>
 </head>
 <body>
-  <header>1688 쇼핑 어시스턴트 <span>AI 베스트 3 추천</span></header>
+  <header>
+    <button id="back-btn">&#8592;</button>
+    <div>1688 쇼핑 어시스턴트 <span>AI 베스트 5 추천</span></div>
+  </header>
 
   <!-- 검색 -->
   <div class="section" id="search-section">
@@ -259,10 +269,9 @@
   <!-- 결과 카드 -->
   <div id="results"></div>
 
-  <!-- 이미지 텍스트 추출 -->
+  <!-- 이미지 텍스트 추출 (상세 뷰에서만 표시) -->
   <div id="ocr-section">
-    <h3>이미지 텍스트 추출 + 번역</h3>
-    <button id="ocr-btn">드래그로 영역 선택</button>
+    <button id="ocr-btn">이미지 번역</button>
     <div id="ocr-status"><div class="spinner"></div><span id="ocr-status-text"></span></div>
     <div id="ocr-result">
       <div class="ocr-original"><div class="ocr-label">원문 (중국어)</div><span id="ocr-original-text"></span></div>
