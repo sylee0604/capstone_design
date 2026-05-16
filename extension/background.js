@@ -1,3 +1,5 @@
+const GPU_SERVER_URL = 'https://anymore-marina-wherever-closing.trycloudflare.com';
+
 // 아이콘 클릭 시 사이드패널 열기
 chrome.action.onClicked.addListener(tab => {
   chrome.sidePanel.open({ windowId: tab.windowId });
@@ -367,7 +369,7 @@ async function cropImage(dataUrl, rect, tabId) {
 async function handleOCRTranslate(imageDataUrl) {
   const base64 = imageDataUrl.replace(/^data:image\/\w+;base64,/, '');
 
-  const response = await fetch('http://localhost:8000/v1/chat/completions', {
+  const response = await fetch(`${GPU_SERVER_URL}/v1/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
