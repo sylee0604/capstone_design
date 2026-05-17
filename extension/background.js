@@ -74,7 +74,7 @@ async function scrapeProducts() {
     return [];
   }
 
-  const cards = findCards().slice(0, 20);
+  const cards = findCards();
 
   const products = [];
   for (const card of cards) {
@@ -92,8 +92,8 @@ async function scrapeProducts() {
     const salesText = salesEl ? salesEl.innerText.trim() : '';
     const salesNum = parseCount(salesText);
 
-    // 구매 10개 미만 제외
-    if (salesNum > 0 && salesNum < 10) continue;
+    // 구매횟수가 표시되어 있는데 10 미만이면 제외
+    if (salesText && salesNum < 10) continue;
 
     // stat-label/stat-value 쌍에서 점수 읽기
     let serviceScore = 0, qualityScore = 0;
@@ -129,7 +129,15 @@ async function scrapeProducts() {
     products.push({
       id: pid,
       title: titleEl ? titleEl.innerText.trim().slice(0, 150) : '',
-      price: priceEl ? priceEl.innerText.replace(/[^\d.]/g, '') : '',
+      price: priceEl ? (() => {
+        const txt = priceEl.innerText;
+        // ¥ 뒤의 숫자 우선
+        const yuanMatch = txt.match(/[¥￥]\s*(\d+(?:\.\d{1,2})?)/);
+        if (yuanMatch) return yuanMatch[1];
+        // 없으면 첫 번째 가격형 숫자 (소수점 이하 최대 2자리)
+        const numMatch = txt.match(/(\d+(?:\.\d{1,2})?)/);
+        return numMatch ? numMatch[1] : '';
+      })() : '',
       image: img,
       sales: salesText,
       salesNum,
@@ -230,9 +238,26 @@ async function handleSearch(koreanQuery) {
     args: [chineseQuery],
   });
 
-  // 4. 검색 결과 로드 + 카드 렌더링 대기
+  // 4. 검색 결과 로드 + 카드 렌더링 대기 + 스크롤로 전체 로드
   await waitForTabLoad(tabId);
   await waitForCards(tabId);
+
+  // 페이지 끝까지 스크롤하여 lazy-load 상품 모두 로드
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    func: async () => {
+      const delay = ms => new Promise(r => setTimeout(r, ms));
+      let prev = -1;
+      for (let i = 0; i < 20; i++) {
+        window.scrollBy(0, 800);
+        await delay(300);
+        if (document.documentElement.scrollHeight === prev) break;
+        prev = document.documentElement.scrollHeight;
+      }
+      window.scrollTo(0, 0);
+    },
+  });
+  await new Promise(r => setTimeout(r, 500));
 
   const pageInfo = await chrome.scripting.executeScript({
     target: { tabId },
@@ -248,13 +273,14 @@ async function handleSearch(koreanQuery) {
 
   const products = injected[0]?.result || [];
   console.log('[products count]', products.length);
+  console.log('[products sample]', products.slice(0, 3).map(p => ({ title: p.title?.slice(0, 20), price: p.price, sales: p.sales, salesNum: p.salesNum })));
 
   if (products.length === 0) {
     return { chineseQuery, products: [], error: '1688 상품을 찾지 못했습니다. 1688에 로그인되어 있는지 확인하세요.' };
   }
 
   // 6. 점수 합산 후 정렬 → 상위 5개
-  console.log('[products with scores]', products.slice(0, 5).map(p => ({ title: p.title?.slice(0, 20), svc: p.serviceScore, qty: p.qualityScore })));
+  console.log('[products with scores]', products.slice(0, 5).map(p => ({ title: p.title?.slice(0, 20), svc: p.serviceScore, qty: p.qualityScore, sales: p.salesNum })));
   function parseNum(str) {
     if (!str) return 0;
     const s = String(str).replace(/,/g, '');
@@ -262,13 +288,26 @@ async function handleSearch(koreanQuery) {
     return parseFloat(s.replace(/[^\d.]/g, '')) || 0;
   }
 
+  // 복합 점수: 판매량(0.2) + 품질(0.3) + 서비스(0.3) + 가격 적정성(0.2)
+  const maxSales = Math.max(...products.map(p => p.salesNum), 1);
+  const maxQuality = Math.max(...products.map(p => p.qualityScore), 1);
+  const maxService = Math.max(...products.map(p => p.serviceScore), 1);
+  const prices = products.map(p => parseFloat(p.price) || 0).filter(v => v > 0).sort((a, b) => b - a);
+  // 최대가 아닌 2번째 높은 가격 기준 (최대가 이상치일 수 있으므로)
+  const refPrice = prices.length >= 2 ? prices[1] : (prices[0] || 1);
+
+  function compositeScore(p) {
+    const salesNorm = p.salesNum / maxSales;
+    const qualityNorm = p.qualityScore / maxQuality;
+    const serviceNorm = p.serviceScore / maxService;
+    // 가격이 낮을수록 높은 점수 (2번째 높은 가격 기준 정규화)
+    const price = parseFloat(p.price) || 0;
+    const priceNorm = price > 0 ? Math.max(1 - price / refPrice, 0) : 0;
+    return salesNorm * 0.2 + qualityNorm * 0.3 + serviceNorm * 0.3 + priceNorm * 0.2;
+  }
+
   const ranked = [...products]
-    .sort((a, b) => {
-      const avgA = (a.serviceScore + a.qualityScore) / ((a.serviceScore > 0 ? 1 : 0) + (a.qualityScore > 0 ? 1 : 0) || 1);
-      const avgB = (b.serviceScore + b.qualityScore) / ((b.serviceScore > 0 ? 1 : 0) + (b.qualityScore > 0 ? 1 : 0) || 1);
-      if (avgB !== avgA) return avgB - avgA;
-      return parseNum(b.sales) - parseNum(a.sales); // 점수 같으면 판매량 순
-    })
+    .sort((a, b) => compositeScore(b) - compositeScore(a))
     .slice(0, 5)
     .map(p => ({
       ...p,
