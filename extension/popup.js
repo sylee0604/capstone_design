@@ -4,6 +4,16 @@ const $ = id => document.getElementById(id);
 let lastProducts = [];
 let lastChineseQuery = '';
 let lastKoreanQuery = '';
+let currentPlatform = '1688';
+
+// --- 플랫폼 선택 ---
+document.querySelectorAll('.platform-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.platform-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentPlatform = btn.dataset.platform;
+  });
+});
 
 // --- 검색 ---
 $('search-btn').addEventListener('click', doSearch);
@@ -16,7 +26,7 @@ function doSearch() {
   setLoading('중국어 번역 중...');
 
   chrome.runtime.sendMessage(
-    { type: 'SEARCH', query },
+    { type: 'SEARCH', query, platform: currentPlatform },
     response => {
       if (chrome.runtime.lastError) {
         showError('확장프로그램 오류: ' + chrome.runtime.lastError.message);
@@ -84,7 +94,7 @@ function buildCard(p, index, ranks) {
       </div>
     </div>
     ${p.reason ? `<div class="card-reason">AI 추천 이유: ${escHtml(p.reason)}</div>` : ''}
-    ${p.url ? `<a class="card-link" href="${escHtml(p.url)}" target="_blank" data-index="${index}">1688에서 보기</a>` : ''}
+    ${p.url ? `<a class="card-link" href="${escHtml(p.url)}" target="_blank" data-index="${index}">${currentPlatform === 'taobao' ? '타오바오에서 보기' : '1688에서 보기'}</a>` : ''}
   `;
 
   const link = card.querySelector('.card-link');

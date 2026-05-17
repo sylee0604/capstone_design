@@ -61,6 +61,37 @@
     .btn-primary { background: #e8392a; color: white; }
     .btn-primary:hover { background: #c0301f; }
 
+    /* 플랫폼 선택 */
+    #platform-section {
+      display: flex;
+      background: white;
+      border-bottom: 1px solid #dee2e6;
+      padding: 8px 16px;
+      gap: 6px;
+    }
+    .platform-btn {
+      flex: 1;
+      padding: 6px 0;
+      border: 1.5px solid #dee2e6;
+      border-radius: 6px;
+      background: white;
+      font-size: 13px;
+      font-weight: 600;
+      color: #6c757d;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .platform-btn.active {
+      border-color: #e8392a;
+      color: #e8392a;
+      background: #fff3f2;
+    }
+    .platform-btn[data-platform="taobao"].active {
+      border-color: #ff5000;
+      color: #ff5000;
+      background: #fff5f0;
+    }
+
     /* 검색 */
     #search-section { background: white; border-bottom: 1px solid #dee2e6; }
     #query-input { width: 100%; padding: 10px 12px; font-size: 14px; }
@@ -248,8 +279,14 @@
 <body>
   <header>
     <button id="back-btn">&#8592;</button>
-    <div>1688 쇼핑 어시스턴트 <span>AI 베스트 5 추천</span></div>
+    <div>중국 쇼핑 어시스턴트 <span>AI 베스트 5 추천</span></div>
   </header>
+
+  <!-- 플랫폼 선택 -->
+  <div id="platform-section">
+    <button class="platform-btn active" data-platform="1688">1688</button>
+    <button class="platform-btn" data-platform="taobao">타오바오</button>
+  </div>
 
   <!-- 검색 -->
   <div class="section" id="search-section">
