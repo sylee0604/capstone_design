@@ -16,17 +16,17 @@ document.querySelectorAll('.platform-btn').forEach(btn => {
 });
 
 // --- 검색 ---
-$('search-btn').addEventListener('click', doSearch);
+$('search-btn').addEventListener('click', () => doSearch());
 $('query-input').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
 
-function doSearch() {
+function doSearch(chineseOverride) {
   const query = $('query-input').value.trim();
   if (!query) return;
 
-  setLoading('중국어 번역 중...');
+  setLoading(chineseOverride ? '검색 중...' : '중국어 번역 중...');
 
   chrome.runtime.sendMessage(
-    { type: 'SEARCH', query, platform: currentPlatform },
+    { type: 'SEARCH', query, platform: currentPlatform, chineseQuery: chineseOverride },
     response => {
       if (chrome.runtime.lastError) {
         showError('확장프로그램 오류: ' + chrome.runtime.lastError.message);
@@ -70,7 +70,7 @@ function buildCard(p, index, ranks) {
   card.className = 'card';
 
   const imgHtml = p.image
-    ? `<img class="card-img" src="${escHtml(p.image)}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" /><div class="card-img-placeholder" style="display:none">&#128722;</div>`
+    ? `<img class="card-img" src="${escHtml(p.image)}" alt="" referrerpolicy="no-referrer" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" /><div class="card-img-placeholder" style="display:none">&#128722;</div>`
     : `<div class="card-img-placeholder">&#128722;</div>`;
 
   const priceYuan = p.price ? parseFloat(p.price).toFixed(2) : '';
@@ -129,6 +129,26 @@ function enterDetailView(index) {
   container.appendChild(card);
   container.style.display = 'flex';
 
+  // 키워드 추천
+  const kwSection = $('keywords-section');
+  const kwList = $('keywords-list');
+  if (p.titleZh) {
+    kwSection.style.display = 'block';
+    kwList.innerHTML = '<span style="color:#6c757d;font-size:12px;">키워드 추출 중...</span>';
+    chrome.runtime.sendMessage(
+      { type: 'EXTRACT_KEYWORDS', titleZh: p.titleZh },
+      response => {
+        if (response?.ok && response.keywords?.length) {
+          renderKeywords(response.keywords);
+        } else {
+          kwSection.style.display = 'none';
+        }
+      }
+    );
+  } else {
+    kwSection.style.display = 'none';
+  }
+
   // OCR 초기화
   $('ocr-result').style.display = 'none';
   $('ocr-status').style.display = 'none';
@@ -139,11 +159,28 @@ function enterDetailView(index) {
 function exitDetailView() {
   $('back-btn').style.display = 'none';
   $('search-section').style.display = 'block';
+  $('keywords-section').style.display = 'none';
   $('ocr-result').style.display = 'none';
   $('ocr-status').style.display = 'none';
   $('ocr-btn').textContent = '이미지 번역';
   $('ocr-btn').classList.remove('active');
 }
+
+function renderKeywords(keywords) {
+  const list = $('keywords-list');
+  list.innerHTML = '';
+  keywords.forEach(({ zh, ko }) => {
+    const pill = document.createElement('button');
+    pill.className = 'keyword-pill';
+    pill.innerHTML = `<span class="keyword-zh">${escHtml(zh)}</span><span class="keyword-ko">${escHtml(ko)}</span>`;
+    pill.addEventListener('click', () => {
+      $('query-input').value = ko;
+      doSearch(zh);
+    });
+    list.appendChild(pill);
+  });
+}
+
 
 // 뒤로가기
 $('back-btn').addEventListener('click', () => {
